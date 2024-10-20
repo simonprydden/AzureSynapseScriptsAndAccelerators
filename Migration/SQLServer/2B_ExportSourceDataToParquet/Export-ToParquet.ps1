@@ -30,96 +30,89 @@
 #Requires -Version 7.0
 
 param(
-    [Parameter(Mandatory=$false, HelpMessage="Configuration file path")]
+    [Parameter(Mandatory = $false, HelpMessage = "Configuration file path")]
     [ValidateScript({
-        if( -Not ($_ | Test-Path -PathType Leaf) ) { throw "File $_ does not exist" }
-        return $true
-    })]
+            if ( -Not ($_ | Test-Path -PathType Leaf) ) { throw "File $_ does not exist" }
+            return $true
+        })]
     [string] $ConfigFile = $("$PSScriptRoot\ConfigFile.csv"),
 
-    [Parameter(Mandatory=$true, HelpMessage="The name of SQL Server / APS / PDW instance")]
+    [Parameter(Mandatory = $true, HelpMessage = "The name of SQL Server / APS / PDW instance")]
     [string] $ServerName, # = "synapse-demo.sql.azuresynapse.net",
 
-    [Parameter(Mandatory=$true, HelpMessage="User name")]
+    [Parameter(Mandatory = $true, HelpMessage = "User name")]
     [string] $UserName, # = "sqladminuser",
 
-    [Parameter(Mandatory=$true, HelpMessage="Password")]
+    [Parameter(Mandatory = $true, HelpMessage = "Password")]
     [SecureString] $Password, # = $(ConvertTo-SecureString "******" -AsPlainText -Force),
 
-    [Parameter(Mandatory=$false, HelpMessage="Connection timeout")]
+    [Parameter(Mandatory = $false, HelpMessage = "Connection timeout")]
     [int] $ConnectionTimeout = 10,
 
-    [Parameter(Mandatory=$false, HelpMessage="Command timeout")]
+    [Parameter(Mandatory = $false, HelpMessage = "Command timeout")]
     [int] $CommandTimeout = 30,
 
-    [Parameter(Mandatory=$false, HelpMessage="Maximum number of rows per rowgroup")]
+    [Parameter(Mandatory = $false, HelpMessage = "Maximum number of rows per rowgroup")]
     [int] $RowsPerRowGroup = 10000000 ,
 
-    [Parameter(Mandatory=$false, HelpMessage="Maximum number of simultaneous jobs")]
+    [Parameter(Mandatory = $false, HelpMessage = "Maximum number of simultaneous jobs")]
     [int] $MaxJobsCount = 4,
 
-    [Parameter(Mandatory=$false, HelpMessage="Use Parquet.NET library or ParquetSharp (default)")]
+    [Parameter(Mandatory = $false, HelpMessage = "Use Parquet.NET library or ParquetSharp (default)")]
     [switch] $UseParquetNet 
 )
 
-Function Get-AbsolutePath
-{
+Function Get-AbsolutePath {
     [CmdletBinding()] 
     param( 
-        [Parameter(Position=0, Mandatory=$true)] [string]$Path
+        [Parameter(Position = 0, Mandatory = $true)] [string]$Path
     ) 
 
     if ([System.IO.Path]::IsPathRooted($Path) -eq $false) {
         if ($PSScriptRoot) {
             return [IO.Path]::GetFullPath( (Join-Path -Path $PSScriptRoot -ChildPath $Path) )
-        } else {
+        }
+        else {
             return [IO.Path]::GetFullPath( (Join-Path -Path $(Get-Location) -ChildPath $Path) )
         }
-    } else {
+    }
+    else {
         return $Path
     }
 }
 
 
-function Download-ParquetSharp 
-{
-    if (-not(Test-Path "$PSScriptRoot\parquetsharp.5.0.0.nupkg\lib\netstandard2.1\ParquetSharp.dll")) {
-        $zipFile = "$PSScriptRoot\parquetsharp.5.0.0.nupkg.zip"
-        if (-not(Test-Path "$PSScriptRoot\parquetsharp.5.0.0.nupkg.zip")) {
-            $url = "https://www.nuget.org/api/v2/package/ParquetSharp/4.0.0"
+function Download-ParquetSharp {
+    $version = "16.1.0"
+    if (-not(Test-Path "$PSScriptRoot\parquetsharp.$version.nupkg\lib\netstandard2.1\ParquetSharp.dll")) {
+        $zipFile = "$PSScriptRoot\parquetsharp.$version.nupkg.zip"
+        if (-not(Test-Path "$PSScriptRoot\parquetsharp.$version.nupkg.zip")) {
+            $url = "https://www.nuget.org/api/v2/package/ParquetSharp/$version"
             Invoke-WebRequest -Uri $url -OutFile $zipFile 
         }
-        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\parquetsharp.5.0.0.nupkg" -Force
+        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\parquetsharp.$version.nupkg" -Force
     }
-
-#    if (-not(Test-Path "$PSScriptRoot\parquetsharp.6.0.1-beta1.nupkg\lib\netstandard2.1\ParquetSharp.dll")) {
-#        $zipFile = "$PSScriptRoot\parquetsharp.6.0.1-beta1.nupkg.zip"
-#        if (-not(Test-Path "$PSScriptRoot\parquetsharp.6.0.1-beta1.nupkg.zip")) {
-#            $url = "https://www.nuget.org/api/v2/package/ParquetSharp/6.0.1-beta1"
-#            Invoke-WebRequest -Uri $url -OutFile $zipFile 
-#        }
-#        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\parquetsharp.6.0.1-beta1.nupkg" -Force
-#    }
 }
 
-function Download-ParquetNet 
-{
-    if (-not(Test-Path "$PSScriptRoot\parquet.net.3.9.1.nupkg\lib\net5.0\Parquet.dll")) {
-        $zipFile = "$PSScriptRoot\parquet.net.3.9.1.nupkg.zip"
-        if (-not(Test-Path "$PSScriptRoot\parquet.net.3.9.1.nupkg.zip")) {
-            $url = "https://www.nuget.org/api/v2/package/Parquet.Net/3.9.1"
+function Download-ParquetNet {
+    $version = "4.7.1"
+    if (-not(Test-Path "$PSScriptRoot\parquet.net.$version.nupkg\lib\net5.0\Parquet.dll")) {
+        $zipFile = "$PSScriptRoot\parquet.net.$version.nupkg.zip"
+        if (-not(Test-Path "$PSScriptRoot\parquet.net.$version.nupkg.zip")) {
+            $url = "https://www.nuget.org/api/v2/package/Parquet.Net/$version"
             Invoke-WebRequest -Uri $url -OutFile $zipFile 
         }
-        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\parquet.net.3.9.1.nupkg" -Force
+        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\parquet.net.$version.nupkg" -Force
     }
 
-    if (-not(Test-Path "$PSScriptRoot\ironsnappy.1.3.0.nupkg\lib\netstandard2.1\IronSnappy.dll")) {
-        $zipFile = "$PSScriptRoot\ironsnappy.1.3.0.nupkg.zip"
-        if (-not(Test-Path "$PSScriptRoot\ironsnappy.1.3.0.nupkg.zip")) {
-            $url = "https://www.nuget.org/api/v2/package/IronSnappy/1.3.0"
+    $version = "1.3.1"
+    if (-not(Test-Path "$PSScriptRoot\ironsnappy.$version.nupkg\lib\netstandard2.1\IronSnappy.dll")) {
+        $zipFile = "$PSScriptRoot\ironsnappy.$version.nupkg.zip"
+        if (-not(Test-Path "$PSScriptRoot\ironsnappy.$version.nupkg.zip")) {
+            $url = "https://www.nuget.org/api/v2/package/IronSnappy/$version"
             Invoke-WebRequest -Uri $url -OutFile $zipFile 
         }
-        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\ironsnappy.1.3.0.nupkg" -Force
+        Expand-Archive -Path $zipFile -DestinationPath "$PSScriptRoot\ironsnappy.$version.nupkg" -Force
     }
 }
 
@@ -131,18 +124,19 @@ function Download-ParquetNet
 # Download Parquet libraries
 if ($UseParquetNet) {
     Download-ParquetNet
-} else {
+}
+else {
     Download-ParquetSharp 
 }
 
 $startTime = Get-Date
 
-$ConfigFile =  Get-AbsolutePath $ConfigFile
+$ConfigFile = Get-AbsolutePath $ConfigFile
 $configData = Import-Csv -Path $ConfigFile
 
 $jobs = @( )
 
-foreach ($record in ($configData | Where-Object {$_.Enabled -eq 1})) {
+foreach ($record in ($configData | Where-Object { $_.Enabled -eq 1 })) {
     $database = $record.Database
     $jobName = $record.JobName
     $query = $record.Query
@@ -164,20 +158,22 @@ foreach ($record in ($configData | Where-Object {$_.Enabled -eq 1})) {
                 $jobs += Start-Job -Name $jobName `
                     -File $PSScriptRoot\Export-ParquetNet.ps1 `
                     -WorkingDirectory $PSScriptRoot `
-                    -ArgumentList $ServerName,$database,$UserName,$Password,$jobName,$query,$filePath,$ConnectionTimeout,$CommandTimeout,$RowsPerRowGroup
-            } else {
+                    -ArgumentList $ServerName, $database, $UserName, $Password, $jobName, $query, $filePath, $ConnectionTimeout, $CommandTimeout, $RowsPerRowGroup
+            }
+            else {
                 $jobs += Start-Job -Name $jobName `
                     -File $PSScriptRoot\Export-ParquetSharp.ps1 `
                     -WorkingDirectory $PSScriptRoot `
-                    -ArgumentList $ServerName,$database,$UserName,$Password,$jobName,$query,$filePath,$ConnectionTimeout,$CommandTimeout,$RowsPerRowGroup
+                    -ArgumentList $ServerName, $database, $UserName, $Password, $jobName, $query, $filePath, $ConnectionTimeout, $CommandTimeout, $RowsPerRowGroup
             }
             $jobCreated = $true
-        } else {
+        }
+        else {
             Start-Sleep -Milliseconds $(Get-Random -Min 50 -Max 200)
         }
 
         # Print all new output
-        Get-Job | Where-Object {$_.HasMoreData} | Receive-Job
+        Get-Job | Where-Object { $_.HasMoreData } | Receive-Job
 
         #Get-Job -State Running | Receive-Job
         # Print out all completed jobs
@@ -188,7 +184,7 @@ foreach ($record in ($configData | Where-Object {$_.Enabled -eq 1})) {
 }
 
 # Print output of all remaining jobs
-while ($jobsWithOutput = Get-Job | Where-Object {$_.HasMoreData}) {
+while ($jobsWithOutput = Get-Job | Where-Object { $_.HasMoreData }) {
     $jobsWithOutput | Receive-Job
 
     Start-Sleep -Milliseconds $(Get-Random -Min 50 -Max 200)
@@ -207,4 +203,4 @@ $finishTime = Get-Date
 
 Write-Host "Program Start Time:   ", $startTime -ForegroundColor Green
 Write-Host "Program Finish Time:  ", $finishTime -ForegroundColor Green
-Write-Host "Program Elapsed Time: ", ($finishTime-$startTime) -ForegroundColor Green
+Write-Host "Program Elapsed Time: ", ($finishTime - $startTime) -ForegroundColor Green
