@@ -434,17 +434,11 @@ Function Export-Table
 # When running from a background job $PSScriptRoot is empty
 $currentLocation = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
 
-if ($UseBeta) {
-    # This is required for PowerShell to be able to find native library
-    $env:Path += ";$currentLocation\parquetsharp.6.0.1-beta1.nupkg\runtimes\win-x64\native"
-    # Load assemblies
-    Add-Type -Path "$currentLocation\parquetsharp.6.0.1-beta1.nupkg\lib\netstandard2.1\ParquetSharp.dll"
-} else {
-    # This is required for PowerShell to be able to find native library
-    $env:Path += ";$currentLocation\parquetsharp.5.0.0.nupkg\runtimes\win-x64\native"
-    # Load assemblies
-    Add-Type -Path "$currentLocation\parquetsharp.5.0.0.nupkg\lib\netstandard2.1\ParquetSharp.dll"
-}
+$version = "16.1.0"
+# This is required for PowerShell to be able to find native library
+$env:Path += ";$currentLocation\parquetsharp.$version.nupkg\runtimes\win-x64\native"
+# Load assemblies
+Add-Type -Path "$currentLocation\parquetsharp.$version.nupkg\lib\netstandard2.1\ParquetSharp.dll"
 
 
 $DateTimeOffset = [TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now)

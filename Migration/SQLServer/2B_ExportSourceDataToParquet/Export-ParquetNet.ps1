@@ -375,8 +375,10 @@ Function Export-Table
 $currentLocation = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
 
 # Load assemblies
-Add-Type -Path "$currentLocation\parquet.net.3.9.1.nupkg\lib\net5.0\Parquet.dll"
-Add-Type -Path "$currentLocation\ironsnappy.1.3.0.nupkg\lib\netstandard2.1\IronSnappy.dll"
+$version = "4.7.1"
+Add-Type -Path "$currentLocation\parquet.net.$version.nupkg\lib\net7.0\Parquet.dll"
+$version = "1.3.1"
+Add-Type -Path "$currentLocation\ironsnappy.$version.nupkg\lib\net7.0\IronSnappy.dll"
 
 
 $DateTimeOffset = [TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now)
