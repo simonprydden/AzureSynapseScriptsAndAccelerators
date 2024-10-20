@@ -39,7 +39,7 @@ param(
     [Parameter(Position=2, Mandatory=$true, HelpMessage="User name")]
     [string] $UserName, # = "sqladminuser",
 
-    [Parameter(Position=3, Mandatory=$true, HelpMessage="Password")]
+    [Parameter(Position=3, Mandatory=$false, HelpMessage="Password")]
     [SecureString] $Password, # = $(ConvertTo-SecureString "******" -AsPlainText -Force),
 
     [Parameter(Position=4, Mandatory=$true, HelpMessage="Job name. Used for reference purposed only.")]
@@ -125,40 +125,6 @@ function Convert-SecureStringToString
   }
 }
 
-
-Function Get-Int96Pieces {
-    [CmdletBinding()]
-    param
-    (
-        [Parameter(ParameterSetName='DateTime', Position=0)]
-        [DateTime] $dt,
-        [Parameter(ParameterSetName='TimeSpan', Position=0)]
-        [TimeSpan] $ts
-    )
-
-    if ($dt) {
-        [long]$nanos = $dt.TimeOfDay.Ticks * 100 # 1000000
-    } else {
-        [long]$nanos = $ts.Ticks * 100
-    }
-    [int]$a = [BitConverter]::ToInt32([BitConverter]::GetBytes($nanos -band 0xFFFFFFFF))
-    [int]$b = $nanos -shr 32
-    
-    if ($dt) {
-        $Year = $dt.Year; $Month = $dt.Month; $Day = $dt.Day;                    
-        if ($Month -lt 3)
-        {
-            $Month = $Month + 12;
-            $Year = $Year - 1;
-        }
-        $c = [math]::Floor($Day + (153 * $Month - 457) / 5 + 365 * $Year + ($Year / 4) - ($Year / 100) + ($Year / 400) + 1721119)
-    } else {
-        $c = 2440589    # 1/2/1970 constant
-    }
-    
-    return $a, $b, $c
-}
-
 enum SqlDataTypes {
     int
     tinyint
@@ -183,6 +149,7 @@ enum SqlDataTypes {
     binary
     varbinary
     string
+    uniqueidentifier
 }
 
 
@@ -199,10 +166,14 @@ Function Export-Table
     Write-Output "$(Get-Date -Format hh:mm:ss.fff) - Job $JobName started"
 
     $conn = New-Object System.Data.SqlClient.SqlConnection 
-    $password = ConvertFrom-SecureString -SecureString $global:Password -AsPlainText
-    #$password = Convert-SecureStringToString $Password
-    $conn.ConnectionString = "Server={0};Database={1};User ID={2};Password={3};Trusted_Connection=False;Connect Timeout={4}" -f $ServerName,$Database,$Username,$Password,$global:ConnectionTimeout
-    
+    if ($global:Password.Length -eq 1) {
+        $conn.ConnectionString = "Server={0};Database={1};User ID={2};Trusted_Connection=True;Connect Timeout={3}" -f $ServerName, $Database, $Username, $global:ConnectionTimeout
+    }
+    else {
+        $password = ConvertFrom-SecureString -SecureString $global:Password -AsPlainText
+        $conn.ConnectionString = "Server={0};Database={1};User ID={2};Password={3};Trusted_Connection=False;Connect Timeout={4}" -f $ServerName, $Database, $Username, $Password, $global:ConnectionTimeout
+    }
+
     [string[]]$columnNames = @()
     [type[]]$columnTypes = @()
     [int[]]$sqlDataTypes = @()
@@ -336,6 +307,11 @@ Function Export-Table
                     $sqlDataTypes += [SqlDataTypes]::binary
                     continue
                 }
+                { $_ -in @("uniqueidentifier") } { 
+                    $dataType = if ($isNull) { [Nullable[guid]] } else { [guid] }
+                    $column = if ($isNull) { [ParquetSharp.Column[Nullable[guid]]]::new($columnName, [ParquetSharp.LogicalType]::UUID()) } else { [ParquetSharp.Column[guid]]::new($columnName, [ParquetSharp.LogicalType]::UUID()) }
+                    $sqlDataTypes += [SqlDataTypes]::uniqueidentifier
+                }
                 Default { throw "Not Implemented" }
             }
     
@@ -346,15 +322,10 @@ Function Export-Table
         $columns = $columnsArray.ToArray([ParquetSharp.Column])
 
         ####### End SCHEMA definition ###############
-
         
-#        $exportPath = Split-Path -Path $FilePath -Parent
-#        if (-not (Test-Path -Path $exportPath)) {
-#            New-Item -Path $exportPath -ItemType Directory | Out-Null
-#        }
-#        #$filePath = Join-Path -Path $ExportPath -ChildPath "$Table.parquet"
+        $CompressionCodec = 'Zstd'
 
-        $fileWriter = [ParquetSharp.ParquetFileWriter]::new($filePath, $columns)
+        $fileWriter = [ParquetSharp.ParquetFileWriter]::new($filePath, $columns, $CompressionCodec)
         
         $data = CreateDataArray $schemaTable
     
@@ -380,21 +351,18 @@ Function Export-Table
                 elseif ($sqlDataType -eq [SqlDataTypes]::real)           { if (!$reader.IsDBNull($i)) { $val = $reader.GetFloat($i) } }
                 elseif ($sqlDataType -eq [SqlDataTypes]::float)          { if (!$reader.IsDBNull($i)) { $val = $reader.GetDouble($i) } }
                 elseif ($sqlDataType -eq [SqlDataTypes]::binary)         { if (!$reader.IsDBNull($i)) { $val = [byte[]]$reader[$i] } }
-                elseif ($sqlDataType -eq [SqlDataTypes]::time)           { if (!$reader.IsDBNull($i)) { 
-                            [TimeSpan]$ts = $reader.GetTimeSpan($i) 
-                            $a, $b, $c = Get-Int96Pieces $ts
-                            $val = [ParquetSharp.Int96]::new($a,$b,$c) } 
-                        }
-                elseif ($sqlDataType -eq [SqlDataTypes]::datetime)       { if (!$reader.IsDBNull($i)) { 
-                            [DateTime]$dt = $reader.GetDateTime($i) 
-                            $a, $b, $c = Get-Int96Pieces $dt
-                            $val = [ParquetSharp.Int96]::new($a,$b,$c) } 
-                        }
-                elseif ($sqlDataType -eq [SqlDataTypes]::datetimeoffset) { if (!$reader.IsDBNull($i)) { 
-                            [DateTimeOffset]$dto = $reader.GetDateTimeOffset($i) 
-                            $val = $dto.ToString("yyyy-MM-dd HH:mm:ss.fffffff zzz", [cultureinfo]::InvariantCulture) }
-                        }
-                else { throw "Not Implemented" }
+                elseif ($sqlDataType -eq [SqlDataTypes]::time) { if (!$reader.IsDBNull($i)) { $val = $reader.GetTimeSpan($i) } }
+                elseif ($sqlDataType -eq [SqlDataTypes]::datetime) { if (!$reader.IsDBNull($i)) { $val = $reader.GetDateTime($i) } }
+                elseif ($sqlDataType -eq [SqlDataTypes]::datetime2) { if (!$reader.IsDBNull($i)) { $val = $reader.GetDateTime($i) } }
+                elseif ($sqlDataType -eq [SqlDataTypes]::datetimeoffset) {
+                    if (!$reader.IsDBNull($i)) { 
+                        [DateTimeOffset]$dto = $reader.GetDateTimeOffset($i) 
+                        $val = $dto.ToString("yyyy-MM-dd HH:mm:ss.fffffff zzz", [cultureinfo]::InvariantCulture) 
+                    }
+                }
+                elseif ($sqlDataType -eq [SqlDataTypes]::uniqueidentifier) { if (!$reader.IsDBNull($i)) { $val = $reader.GetGuid($i) } }
+                else { throw "Data type ""$sqlDataType"" Not Implemented 2" }
+
 
                 [void]$data[$columnNames[$i]].Add($val)             
             }    
@@ -419,7 +387,17 @@ Function Export-Table
         }
 
         Write-Output "$(Get-Date -Format hh:mm:ss.fff) - Job $JobName completed"
-    } 
+    }
+    catch {
+        $e = $_.Exception
+        #this is wrong
+        $line = $_.Exception.InvocationInfo.ScriptLineNumber
+
+        Write-Host -ForegroundColor Red "caught exception: $e at $line"
+        Write-Host -ForegroundColor Cyan $_
+        Add-Content -Path Export-table.log -Value "caught exception: $e at $line"
+        $("[" + (Get-Date) + "] " + $_)
+    }
     finally {
         if ($conn) { $conn.Close() }
         if ($fileWriter) { $fileWriter.Dispose() }
@@ -441,8 +419,8 @@ $env:Path += ";$currentLocation\parquetsharp.$version.nupkg\runtimes\win-x64\nat
 Add-Type -Path "$currentLocation\parquetsharp.$version.nupkg\lib\netstandard2.1\ParquetSharp.dll"
 
 
-$DateTimeOffset = [TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now)
-$DateTimeOffset = $DateTimeOffset.Negate()
+# $DateTimeOffset = [TimeZoneInfo]::Local.GetUtcOffset([DateTime]::Now)
+# $DateTimeOffset = $DateTimeOffset.Negate()
 
 $startTime = Get-Date
 
