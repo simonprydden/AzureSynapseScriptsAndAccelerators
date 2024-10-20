@@ -19,3 +19,7 @@ ProjectSettings.json
 Migration/APS/5_DeployScriptsToSynapse/*.log
 Migration/SQLServer/Output/**
 
+Migration/SQLServer/2B_ExportSourceDataToParquet/parquetsharp.*.nupkg.zip
+Migration/SQLServer/2B_ExportSourceDataToParquet/parquetsharp.*.nupkg
+Migration/SQLServer/2B_ExportSourceDataToParquet/Output
+Migration/SQLServer/2B_ExportSourceDataToParquet/*.log
